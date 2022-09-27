@@ -1,5 +1,11 @@
 #!/usr/bin/python3
 
+# A minimal Telnet server implementation.
+#
+# To get started, you should create an instance of ConnectionManager and provide it with new
+# event handlers to replace the default ones. Take a look at chat_server.py to see a very
+# basic example of this.
+
 import time
 import socket
 from collections import deque
@@ -74,8 +80,11 @@ class ConnectionManager:
         print(f'Connection #{connection.id} sent a Telnet control sequence: {disposition} {parameter}')
 
     def __init__(self, server_socket):
+        
+        # The list of active connections. You can iterate over this, but don't modify it.
         self.active_connections = deque()
 
+        # The server socket.
         self.server_socket = server_socket
 
         # Set these to your own event-handler functions.
@@ -90,6 +99,8 @@ class ConnectionManager:
 
     def update(self):
         # Updates all the managed connections and accepts new ones. Call this once per frame.
+
+        # Step 1: Accept a new connection if one is waiting.
         try:
             sock, addr = self.server_socket.accept()
             sock.setblocking(0)
@@ -100,9 +111,15 @@ class ConnectionManager:
         except BlockingIOError:
             pass
 
+        # Step 2: manage existing connections.
+        # This step is why active_connections is a deque. We pop each connection
+        # off the left one by one and re-add them to the right. If someone disconnected,
+        # we simmply don't re-add them. This means we're not modifying a list while
+        # iterating over it.
         for _ in range(len(self.active_connections)):
             connection = self.active_connections.popleft()
-
+            
+            # Try to send any outgoing data.
             try:
                 if connection.out_queue:
                     num_bytes_sent = connection.sock.send(connection.out_queue)
@@ -113,7 +130,7 @@ class ConnectionManager:
                 pass
             except IOError as e:
                 connection.disconnect(str(e))
-            
+           
             if connection.timeout:
                 if (time.time() - connection.last_activity) > connection.timeout:
                     connection.disconnect('timed out') 
@@ -121,6 +138,7 @@ class ConnectionManager:
             if len(connection.current_line) > connection.max_line:
                 connection.disconnect('maximum line size exceeded')
 
+            # Handle pending disconnections.
             if connection.pending_disconnect is not None:
                 connection.connected = False
                 self.event_disconnection(connection, connection.pending_disconnect)
@@ -130,6 +148,7 @@ class ConnectionManager:
                 except IOError: pass
                 continue
 
+            # Try to receive incoming data.
             bytes_received = b''
             try:
                 bytes_received = connection.sock.recv(4096)
@@ -139,7 +158,8 @@ class ConnectionManager:
                 pass
             except IOError as e:
                 connection.disconnect(str(e))
-            
+           
+            # If receiving data didn't trigger a disconnect, parse the received data.
             if connection.pending_disconnect is None:
                 for byte in bytes_received:
                     if connection.mode == 'normal':
